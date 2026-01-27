@@ -4,7 +4,7 @@ import plotly.express as px
 import requests
 from io import StringIO
 
-st.set_page_config(page_title="Dashboard من GitHub CSV", layout="wide")
+st.set_page_config(page_title="Dashboard ", layout="wide")
 st.title("📊 Dashboard من GitHub CSV")
 
 # تحميل البيانات من GitHub
@@ -74,3 +74,4 @@ fig.update_layout(
     paper_bgcolor="white"
 )
 st.plotly_chart(fig, use_container_width=True)
+
