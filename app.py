@@ -21,5 +21,14 @@ if selected_vendors:
 st.write("### جدول البيانات")
 st.dataframe(filtered_df)
 
+# ✅ زرار تحميل البيانات الظاهرة
+csv = filtered_df.to_csv(index=False).encode("utf-8")
+st.download_button(
+    label="⬇️ تحميل البيانات الظاهرة كـ CSV",
+    data=csv,
+    file_name="filtered_data.csv",
+    mime="text/csv"
+)
+
 fig = px.histogram(filtered_df, x="month", title="عدد الطلبات لكل شهر")
 st.plotly_chart(fig)
