@@ -6,10 +6,14 @@ from io import StringIO
 
 st.title("Dashboard من GitHub CSV")
 
-url = "https://raw.githubusercontent.com/elgafey/sql-data/main/net_received_po.csv"
-response = requests.get(url)
-response.encoding = "utf-8"
-df = pd.read_csv(StringIO(response.text))
+@st.cache_data
+def load_data():
+    url = "https://raw.githubusercontent.com/elgafey/sql-data/main/net_received_po.csv"
+    response = requests.get(url)
+    response.encoding = "utf-8"
+    return pd.read_csv(StringIO(response.text))
+
+df = load_data()
 
 vendor_list = df["vendor_name"].dropna().unique()
 selected_vendors = st.multiselect("اختر الموردين", vendor_list)
@@ -21,7 +25,6 @@ if selected_vendors:
 st.write("### جدول البيانات")
 st.dataframe(filtered_df)
 
-# ✅ زرار تحميل البيانات الظاهرة
 csv = filtered_df.to_csv(index=False).encode("utf-8")
 st.download_button(
     label="⬇️ تحميل البيانات الظاهرة كـ CSV",
