@@ -2,96 +2,103 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
+# إعدادات الصفحة
+st.set_page_config(page_title="Raw Material Report", layout="wide")
+
 # -----------------------------
 # Load CSV from GitHub
 # -----------------------------
-url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/raw_material_daily.csv"
-df = pd.read_csv(url)
+@st.cache_data # إضافة كاش لتحسين السرعة
+def load_data():
+    url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/raw_material_daily.csv"
+    # قراءة الملف مع تحديد الترميز لضمان ظهور اللغة العربية
+    df = pd.read_csv(url, encoding='utf-8')
+    
+    # تنظيف عمود التاريخ
+    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+    # حذف أي صفوف بها تاريخ غير صحيح
+    df = df.dropna(subset=["date"])
+    return df
 
-# -----------------------------
-# Fix date column safely
-# -----------------------------
-# تحويل التاريخ لنص
-df["date"] = df["date"].astype(str).str.strip()
+try:
+    df_raw = load_data()
+    df = df_raw.copy()
 
-# تحويل datetime مع تجاهل الأخطاء
-df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    # -----------------------------
+    # Sidebar Filters
+    # -----------------------------
+    st.sidebar.header("🔍 Filters")
 
-# حذف الصفوف اللي فيها تاريخ بايظ
-df = df.dropna(subset=["date"])
+    # تحديد أقل وأكبر تاريخ متاح في البيانات
+    min_date = df["date"].min()
+    max_date = df["date"].max()
 
-# تحويل التاريخ إلى تاريخ فقط بدون وقت
-df["date"] = df["date"].dt.date
+    date_input = st.sidebar.date_input(
+        "Select Date Range",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date
+    )
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
-st.title("📦 Raw Material Daily Report")
-st.write("")
+    # -----------------------------
+    # معالجة اختيار التاريخ (حل مشكلة الـ TypeError)
+    # -----------------------------
+    # st.date_input يرجع tuple عند اختيار Range
+    if isinstance(date_input, (list, tuple)) and len(date_input) == 2:
+        start_date, end_date = date_input
+    elif isinstance(date_input, (list, tuple)) and len(date_input) == 1:
+        start_date = end_date = date_input[0]
+    else:
+        start_date = end_date = date_input
 
-# -----------------------------
-# Filters
-# -----------------------------
-st.sidebar.header("Filters")
+    # تطبيق الفلتر
+    mask = (df["date"] >= start_date) & (df["date"] <= end_date)
+    df_filtered = df.loc[mask]
 
-date_input = st.sidebar.date_input(
-    "Date From → To",
-    value=[df["date"].min(), df["date"].max()],
-    min_value=df["date"].min(),
-    max_value=df["date"].max()
-)
+    # -----------------------------
+    # Streamlit UI
+    # -----------------------------
+    st.title("📦 Raw Material Daily Report")
+    
+    # عرض إحصائيات سريعة (Metrics)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Rows", len(df_filtered))
+    with col2:
+        # افتراض وجود عمود للكمية اسمه raw_qty_used (حسب بياناتك السابقة)
+        if "raw_qty_used" in df_filtered.columns:
+            total_qty = df_filtered["raw_qty_used"].sum()
+            st.metric("Total Qty Used", f"{total_qty:,.2f}")
+    with col3:
+        if "raw_value_used" in df_filtered.columns:
+            total_val = df_filtered["raw_value_used"].sum()
+            st.metric("Total Value", f"{total_val:,.2f}")
 
-# -----------------------------
-# Normalize Streamlit date input
-# -----------------------------
-def normalize_date(value):
-    # لو القيمة List (Range)
-    if isinstance(value, list):
-        if len(value) == 0:
-            return None
-        return pd.to_datetime(value[0]).date()
+    st.divider()
 
-    # لو None
-    if value is None:
-        return None
+    # عرض الجدول
+    st.subheader("📊 Data Details")
+    st.dataframe(df_filtered, use_container_width=True)
 
-    # لو date أو datetime
-    return pd.to_datetime(value).date()
+    # -----------------------------
+    # Download as Excel
+    # -----------------------------
+    def to_excel(df_to_download):
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            df_to_download.to_excel(writer, index=False, sheet_name="Sheet1")
+        return output.getvalue()
 
-# لو Streamlit رجّع list فيها قيمتين
-if isinstance(date_input, list) and len(date_input) == 2:
-    start_date = normalize_date(date_input[0])
-    end_date = normalize_date(date_input[1])
-else:
-    start_date = normalize_date(date_input)
-    end_date = normalize_date(date_input)
+    st.sidebar.divider()
+    excel_file = to_excel(df_filtered)
 
-# -----------------------------
-# Apply filter
-# -----------------------------
-df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+    st.sidebar.download_button(
+        label="⬇️ Download Filtered Data (Excel)",
+        data=excel_file,
+        file_name=f"raw_material_{start_date}_to_{end_date}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-# -----------------------------
-# Display Table
-# -----------------------------
-st.subheader("📊 Raw Material Usage (Filtered)")
-st.dataframe(df, use_container_width=True)
-
-# -----------------------------
-# Download as Excel
-# -----------------------------
-def to_excel(df):
-    output = BytesIO()
-    writer = pd.ExcelWriter(output, engine="xlsxwriter")
-    df.to_excel(writer, index=False, sheet_name="RawMaterialDaily")
-    writer.close()
-    return output.getvalue()
-
-excel_file = to_excel(df)
-
-st.download_button(
-    label="⬇️ Download Excel",
-    data=excel_file,
-    file_name="raw_material_daily.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+except Exception as e:
+    st.error(f"Error loading data: {e}")
+    st.info("Check if the GitHub URL is public and the CSV format is correct.")
