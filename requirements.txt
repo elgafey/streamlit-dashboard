@@ -3,3 +3,4 @@ pandas
 xlsxwriter
 psycopg2-binary
 pdfkit
+fpdf2
