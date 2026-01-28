@@ -14,7 +14,7 @@ df["date"] = pd.to_datetime(df["date"])
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.title("📦 Raw Material Daily Consumption Report")
+st.title("📦 Raw Material Daily  Report")
 st.write("")
 
 # -----------------------------
@@ -22,22 +22,23 @@ st.write("")
 # -----------------------------
 st.sidebar.header("Filters")
 
-# Date Picker
-selected_day = st.sidebar.date_input(
-    "اختر اليوم",
-    value=None,
+# Date Range Picker
+start_date, end_date = st.sidebar.date_input(
+    "اdate from to)",
+    value=[df["date"].min(), df["date"].max()],
     min_value=df["date"].min(),
     max_value=df["date"].max()
 )
 
-# Apply filter only if user selected a date
-if selected_day:
-    df = df[df["date"].dt.date == selected_day]
+# Apply filter only if both dates selected
+if start_date and end_date:
+    df = df[(df["date"] >= pd.to_datetime(start_date)) & 
+            (df["date"] <= pd.to_datetime(end_date))]
 
 # -----------------------------
 # Display Table
 # -----------------------------
-st.subheader("📊 Daily Raw Material Usage")
+st.subheader("📊 Raw Material Usage (Filtered)")
 st.dataframe(df, use_container_width=True)
 
 # -----------------------------
