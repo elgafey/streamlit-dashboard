@@ -4,48 +4,49 @@ from fpdf import FPDF
 import re
 
 # إعدادات الصفحة
-st.set_page_config(page_title="Ar Suhul - One Line Ledger", layout="wide")
+st.set_page_config(page_title="Ar Suhul - Professional Ledger", layout="wide")
 
 st.title("Customer Account Statements")
 st.markdown("---")
 
-# دالة تنظيف النص لمنع الخطأ في الـ PDF
+# دالة تنظيف النص لمنع أخطاء الـ PDF واستبدال القيم الفارغة
 def clean_text(text):
     t = str(text).strip()
-    # لو القيمة 'false' أو فاضية نرجع نص فاضي
+    # إذا كانت القيمة ناتجة عن خلل في القراءة (فراغ أو False) نضع وصفاً افتراضياً
     if t.lower() in ['false', 'none', 'nan', '']:
         return "Journal Entry"
+    # حذف أي حروف غير إنجليزية لضمان عمل مكتبة FPDF
     return re.sub(r'[^\x00-\x7F]+', ' ', t).strip()
 
 # -----------------------------
-# تحميل البيانات (بدون زيادة سطر واحد)
+# تحميل وتجهيز البيانات (بدون تكرار وهمي)
 # -----------------------------
 @st.cache_data 
-def load_and_fix_data():
+def load_and_clean_data():
     url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/ar_suhul.csv"
     
-    # السر هنا: na_filter=False بيمنع بايثون إنه يفسر الفراغات كحركات جديدة
+    # السر هنا: na_filter=False يمنع بايثون من تحويل الفراغات في الملف إلى كلمة false
     df = pd.read_csv(url, encoding='utf-8', na_filter=False)
     
-    # تحويل التاريخ للأرقام
+    # تحويل التواريخ وتنسيق الأرقام لضمان دقة الحسابات
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
     df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
     df["credit"] = pd.to_numeric(df["credit"], errors="coerce").fillna(0)
     
-    # حذف أي تكرار ناتج عن القراءة (بيخلي سطر واحد بس لكل حركة)
+    # حذف أي صفوف مكررة تماماً قد تكون موجودة في قاعدة البيانات
     df = df.drop_duplicates()
     
     return df
 
 # -----------------------------
-# إنشاء الـ PDF
+# دالة إصدار الـ PDF المجمع
 # -----------------------------
 def generate_pdf(df_all, selected_partners):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     
     for partner in selected_partners:
-        # تصفية العميل وترتيبه
+        # تصفية البيانات للعميل المختار وترتيبها زمنياً
         cust_df = df_all[df_all['partner_id'] == partner].copy().sort_values(by='date')
         
         # حساب الرصيد التراكمي بناءً على السطور الحقيقية فقط
@@ -53,14 +54,15 @@ def generate_pdf(df_all, selected_partners):
         
         pdf.add_page()
         
+        # ترويسة الصفحة
         pdf.set_font("Helvetica", 'B', 16)
         pdf.cell(0, 10, f"Statement: {clean_text(partner)}", ln=True, align='C')
         pdf.set_font("Helvetica", '', 12)
         final_bal = cust_df['Running_Balance'].iloc[-1]
-        pdf.cell(0, 10, f"Current Balance: {final_bal:,.2f} EGP", ln=True, align='C')
+        pdf.cell(0, 10, f"Final Balance: {final_bal:,.2f} EGP", ln=True, align='C')
         pdf.ln(10)
         
-        # الجدول
+        # رأس الجدول
         pdf.set_font("Helvetica", 'B', 10)
         pdf.set_fill_color(240, 240, 240)
         pdf.cell(30, 10, "Date", 1, 0, 'C', True)
@@ -69,6 +71,7 @@ def generate_pdf(df_all, selected_partners):
         pdf.cell(30, 10, "Credit", 1, 0, 'C', True)
         pdf.cell(30, 10, "Balance", 1, 1, 'C', True)
         
+        # محتوى الجدول
         pdf.set_font("Helvetica", '', 9)
         for _, row in cust_df.iterrows():
             pdf.cell(30, 8, str(row['date']), 1)
@@ -80,24 +83,33 @@ def generate_pdf(df_all, selected_partners):
     return pdf.output()
 
 # -----------------------------
-# الواجهة
+# واجهة المستخدم (Streamlit UI)
 # -----------------------------
 try:
-    df_clean = load_and_fix_data()
-    partners = sorted(df_clean['partner_id'].unique().tolist())
+    df_main = load_and_clean_data()
+    partners = sorted(df_main['partner_id'].unique().tolist())
     
-    selected_partners = st.sidebar.multiselect("Select Customers", options=partners)
+    selected_partners = st.sidebar.multiselect("Select Customers for Statement", options=partners)
 
     if selected_partners:
-        if st.sidebar.button("Download PDF"):
-            pdf_bytes = generate_pdf(df_clean, selected_partners)
-            st.sidebar.download_button("📥 Save PDF", data=bytes(pdf_bytes), file_name="Statement.pdf")
+        if st.sidebar.button("Generate Final PDF"):
+            pdf_bytes = generate_pdf(df_main, selected_partners)
+            st.sidebar.download_button(
+                label="📥 Download PDF",
+                data=bytes(pdf_bytes),
+                file_name="Customer_Statements.pdf",
+                mime="application/pdf"
+            )
+            st.success("PDF ready for download!")
 
+        # المعاينة على الشاشة للتأكد من عدم وجود تكرار
         for p in selected_partners:
-            with st.expander(f"Preview: {p}", expanded=True):
-                p_df = df_clean[df_clean['partner_id'] == p].copy()
+            with st.expander(f"Data Preview: {p}", expanded=True):
+                p_df = df_main[df_main['partner_id'] == p].copy().sort_values(by='date')
                 p_df['Running_Balance'] = (p_df['debit'] - p_df['credit']).cumsum()
-                # هنا هيظهر سطر واحد بس بقيمة 157,960.50
                 st.table(p_df[['date', 'move_name', 'debit', 'credit', 'Running_Balance']])
+    else:
+        st.info("Please select a customer from the sidebar to display their statement.")
+
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Error Loading Application: {e}")
