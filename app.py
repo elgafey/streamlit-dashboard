@@ -11,9 +11,17 @@ df = pd.read_csv(url)
 # -----------------------------
 # Fix date column safely
 # -----------------------------
+# تحويل التاريخ لنص
 df["date"] = df["date"].astype(str).str.strip()
+
+# تحويل datetime مع تجاهل الأخطاء
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+# حذف الصفوف اللي فيها تاريخ بايظ
 df = df.dropna(subset=["date"])
+
+# تحويل التاريخ إلى تاريخ فقط بدون وقت
+df["date"] = df["date"].dt.date
 
 # -----------------------------
 # Streamlit UI
@@ -43,8 +51,9 @@ else:
     start_date = date_input
     end_date = date_input
 
-start_date = pd.to_datetime(start_date)
-end_date = pd.to_datetime(end_date)
+# تحويل start/end إلى تاريخ فقط
+start_date = pd.to_datetime(start_date).date()
+end_date = pd.to_datetime(end_date).date()
 
 # -----------------------------
 # Apply filter
