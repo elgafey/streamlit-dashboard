@@ -1,78 +1,56 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import requests
-from io import StringIO
+from io import BytesIO
 
-st.set_page_config(page_title="Dashboard ", layout="wide")
-st.title("📊 Dashboard ")
+# -----------------------------
+# Load CSV from GitHub
+# -----------------------------
+url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/raw_material_daily.csv"
+df = pd.read_csv(url)
 
-# تحميل البيانات من GitHub
-@st.cache_data
-def load_data():
-    url = "https://raw.githubusercontent.com/elgafey/sql-data/main/net_received_po.csv"
-    response = requests.get(url)
-    response.encoding = "utf-8"
-    return pd.read_csv(StringIO(response.text))
+# Convert date column to datetime
+df["date"] = pd.to_datetime(df["date"])
 
-df = load_data()
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.title("📦 Raw Material Daily Consumption Report")
+st.write("تقرير يومي لاستهلاك المواد الخام (كمية + قيمة)")
 
-# تحويل التاريخ
-df["date_order"] = pd.to_datetime(df["date_order"], errors="coerce")
-df = df.dropna(subset=["date_order"])  # حذف الصفوف اللي فيها تاريخ غير صالح
+# -----------------------------
+# Filters
+# -----------------------------
+st.sidebar.header("Filters")
 
-# فلتر التاريخ
-min_date = df["date_order"].min().date()
-max_date = df["date_order"].max().date()
+# Day filter
+unique_days = sorted(df["date"].dt.date.unique())
+selected_day = st.sidebar.selectbox("اختر اليوم", ["All"] + [str(d) for d in unique_days])
 
-col1, col2 = st.columns(2)
-with col1:
-    from_date = st.date_input("📅 من تاريخ", min_date)
-with col2:
-    to_date = st.date_input("📅 إلى تاريخ", max_date)
+if selected_day != "All":
+    df = df[df["date"].dt.date == pd.to_datetime(selected_day).date()]
 
-# فلترة حسب التاريخ
-filtered_df = df[
-    (df["date_order"] >= pd.to_datetime(from_date)) &
-    (df["date_order"] <= pd.to_datetime(to_date))
-]
+# -----------------------------
+# Display Table
+# -----------------------------
+st.subheader("📊 Daily Raw Material Usage")
+st.dataframe(df, use_container_width=True)
 
-# فلتر الموردين
-vendor_list = filtered_df["vendor_name"].dropna().unique()
-selected_vendors = st.multiselect("اختر الموردين", vendor_list)
+# -----------------------------
+# Download as Excel
+# -----------------------------
+def to_excel(df):
+    output = BytesIO()
+    writer = pd.ExcelWriter(output, engine="xlsxwriter")
+    df.to_excel(writer, index=False, sheet_name="RawMaterialDaily")
+    writer.close()
+    processed_data = output.getvalue()
+    return processed_data
 
-if selected_vendors:
-    filtered_df = filtered_df[filtered_df["vendor_name"].isin(selected_vendors)]
+excel_file = to_excel(df)
 
-# جدول البيانات
-st.write("### 📋 جدول البيانات")
-st.dataframe(filtered_df, use_container_width=True)
-
-# زرار تحميل البيانات
-csv = filtered_df.to_csv(index=False).encode("utf-8")
 st.download_button(
-    label="⬇️ تحميل البيانات الظاهرة كـ CSV",
-    data=csv,
-    file_name="filtered_data.csv",
-    mime="text/csv"
+    label="⬇️ Download Excel",
+    data=excel_file,
+    file_name="raw_material_daily.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
-
-# رسم بياني حسب شهر الطلب
-filtered_df["order_month"] = filtered_df["date_order"].dt.to_period("M").astype(str)
-fig = px.histogram(
-    filtered_df,
-    x="order_month",
-    title="📦 عدد الطلبات لكل شهر",
-    color="order_month",
-    text_auto=True
-)
-fig.update_layout(
-    xaxis_title="الشهر",
-    yaxis_title="عدد الطلبات",
-    title_x=0.5,
-    plot_bgcolor="white",
-    paper_bgcolor="white"
-)
-st.plotly_chart(fig, use_container_width=True)
-
-
