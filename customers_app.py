@@ -39,7 +39,7 @@ def generate_pdf(df_all, selected_partners):
         pdf.set_font("Helvetica", 'B', 14)
         pdf.cell(0, 8, "SUHUL ALBEEAH", ln=True, align='L') 
         pdf.set_font("Helvetica", '', 10)
-        pdf.cell(0, 5, "Environmental Plains for Raw Material Recycling", ln=True, align='L')
+        pdf.cell(0, 5, "", ln=True, align='L')
         pdf.cell(0, 5, "VAT Number: 300451393600003", ln=True, align='L')
         pdf.ln(5)
         
@@ -67,7 +67,7 @@ def generate_pdf(df_all, selected_partners):
 # --- Dashboard Interface ---
 df = load_data()
 if not df.empty:
-    st.sidebar.title("Suhul Albeeah Tools") #
+    st.sidebar.title(" Tools") #
     all_p = sorted(df['partner_id'].unique().tolist())
     
     select_all = st.sidebar.checkbox("Select All Customers")
