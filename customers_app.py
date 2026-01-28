@@ -3,106 +3,96 @@ import pandas as pd
 from fpdf import FPDF
 import re
 
-# Page configurations
-st.set_page_config(page_title="Ar Suhul - Ledger System", layout="wide")
-
-def clean_text(text):
-    t = str(text).strip()
-    if not t or t.lower() in ['none', 'nan']: return "Entry"
-    return re.sub(r'[^\x00-\x7F]+', ' ', t).strip()
+st.set_page_config(page_title="Suhul Albeeah - Financial System", layout="wide")
 
 @st.cache_data 
 def load_data():
     try:
         url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/ar_suhul.csv"
         df = pd.read_csv(url, encoding='utf-8')
-        # Format dates correctly to avoid NaT
         df['date'] = df['date'].str.split(' GMT').str[0]
         df['date'] = pd.to_datetime(df['date'], errors='coerce')
-        # Ensure financial columns are numeric
         df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
         df["credit"] = pd.to_numeric(df["credit"], errors="coerce").fillna(0)
+        df["net"] = df["debit"] - df["credit"]
         return df
     except:
         return pd.DataFrame()
 
-def generate_pdf(df_all, selected_partners):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    for partner in selected_partners:
-        cust_df = df_all[df_all['partner_id'] == partner].copy().sort_values(by='date')
-        if cust_df.empty: continue
-        cust_df['Running_Balance'] = (cust_df['debit'] - cust_df['credit']).cumsum()
-        
-        pdf.add_page()
-        # HEADER: Fixed with English name to prevent Unicode Errors
-        pdf.set_font("Helvetica", 'B', 14)
-        pdf.cell(0, 8, "SUHUL ALBEEAH", ln=True, align='L') 
-        pdf.set_font("Helvetica", '', 10)
-        pdf.cell(0, 5, "", ln=True, align='L')
-        pdf.cell(0, 5, "VAT Number: 300451393600003", ln=True, align='L')
-        pdf.ln(5)
-        
-        pdf.set_font("Helvetica", 'B', 16)
-        pdf.cell(0, 10, "PARTNER LEDGER", ln=True, align='C')
-        pdf.set_font("Helvetica", 'B', 12)
-        pdf.cell(0, 10, f"Customer: {clean_text(partner)}", ln=True)
-        
-        # Table Setup
-        pdf.set_font("Helvetica", 'B', 10); pdf.set_fill_color(240, 240, 240)
-        cols = [("Date", 30), ("Description", 70), ("Debit", 30), ("Credit", 30), ("Balance", 30)]
-        for h, w in cols: pdf.cell(w, 10, h, 1, 0, 'C', True)
-        pdf.ln()
-        
-        pdf.set_font("Helvetica", '', 9)
-        for _, row in cust_df.iterrows():
-            d = row['date'].strftime('%Y-%m-%d') if pd.notnull(row['date']) else "N/A"
-            pdf.cell(30, 8, d, 1)
-            pdf.cell(70, 8, clean_text(row['move_name'])[:40], 1)
-            pdf.cell(30, 8, f"{row['debit']:,.2f}", 1, 0, 'R')
-            pdf.cell(30, 8, f"{row['credit']:,.2f}", 1, 0, 'R')
-            pdf.cell(30, 8, f"{row['Running_Balance']:,.2f}", 1, 1, 'R')
-    return bytes(pdf.output(dest='S'))
-
-# --- Dashboard Interface ---
 df = load_data()
+
 if not df.empty:
-    st.sidebar.title(" Tools") #
-    all_p = sorted(df['partner_id'].unique().tolist())
+    # --- Sidebar Controls ---
+    st.sidebar.title("Global Filters")
+    # فلتر السنين
+    available_years = sorted(df['date'].dt.year.dropna().unique().astype(int).tolist(), reverse=True)
+    selected_year = st.sidebar.selectbox("Select Fiscal Year:", available_years)
     
-    select_all = st.sidebar.checkbox("Select All Customers")
-    
-    if select_all:
-        selected = all_p
-    else:
-        search = st.sidebar.text_input("Quick Customer Search:", "")
-        filtered = [p for p in all_p if search.lower() in p.lower()]
-        selected = st.sidebar.multiselect("Select Target Customers:", options=filtered)
+    # --- Tabs System ---
+    tab1, tab2 = st.tabs(["📑 Customer Ledger", "⚖️ Trial Balance"])
 
-    # Calculate metrics for the Dashboard
-    view_df = df[df['partner_id'].isin(selected)] if selected else df
-    t_deb, t_cre = view_df['debit'].sum(), view_df['credit'].sum()
-
-    st.title("Customer Ledger Dashboard")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Debit", f"{t_deb:,.2f}")
-    c2.metric("Total Credit", f"{t_cre:,.2f}")
-    c3.metric("Net Balance", f"{(t_deb - t_cre):,.2f}")
-    st.markdown("---")
-
-    if selected:
-        if st.sidebar.button(f"Generate PDF for {len(selected)} Records"):
-            with st.spinner("Processing..."):
-                st.session_state['pdf_blob'] = generate_pdf(df, selected)
+    # --- Tab 1: Customer Ledger (القديم بتاعنا) ---
+    with tab1:
+        st.subheader("Individual Customer Statements")
+        all_p = sorted(df['partner_id'].unique().tolist())
+        select_all = st.checkbox("Select All for PDF")
+        selected = all_p if select_all else st.multiselect("Pick Customers:", options=all_p)
         
-        if 'pdf_blob' in st.session_state:
-            st.sidebar.download_button("📥 Download Statements", st.session_state['pdf_blob'], "Suhul_Report.pdf")
+        if selected:
+            # Dashboard Metrics
+            stats_df = df[df['partner_id'].isin(selected)]
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Debit", f"{stats_df['debit'].sum():,.2f}")
+            c2.metric("Total Credit", f"{stats_df['credit'].sum():,.2f}")
+            c3.metric("Net Exposure", f"{stats_df['net'].sum():,.2f}")
+            
+            # Preview (First 3)
+            for p in selected[:3]:
+                with st.expander(f"Ledger: {p}"):
+                    p_df = df[df['partner_id'] == p].copy().sort_values(by='date')
+                    p_df['Running_Balance'] = p_df['net'].cumsum()
+                    st.dataframe(p_df[['date', 'move_name', 'debit', 'credit', 'Running_Balance']])
 
-        # Smart Preview to prevent Black Screen
-        for p in selected[:3]:
-            with st.expander(f"Preview: {p}"):
-                p_df = df[df['partner_id'] == p].copy().sort_values(by='date')
-                p_df['Running_Balance'] = (p_df['debit'] - p_df['credit']).cumsum()
-                st.table(p_df[['date', 'move_name', 'debit', 'credit', 'Running_Balance']].tail(10))
+    # --- Tab 2: Trial Balance (الجديد) ---
+    with tab2:
+        st.subheader(f"Customers Trial Balance - Year {selected_year}")
+        
+        # 1. Initial Balance: كل الحركات قبل السنة المختارة
+        initial_mask = df['date'].dt.year < selected_year
+        initial_df = df[initial_mask].groupby('partner_id')['net'].sum().reset_index()
+        initial_df.columns = ['partner_id', 'Initial Balance']
+        
+        # 2. Period Balance: كل الحركات داخل السنة المختارة
+        period_mask = df['date'].dt.year == selected_year
+        period_df = df[period_mask].groupby('partner_id')['net'].sum().reset_index()
+        period_df.columns = ['partner_id', 'Period Balance']
+        
+        # دمج البيانات
+        trial_df = pd.merge(df[['partner_id']].drop_duplicates(), initial_df, on='partner_id', how='left')
+        trial_df = pd.merge(trial_df, period_df, on='partner_id', how='left')
+        
+        # ملء القيم الفارغة بالأصفار وحساب الـ Ending Balance
+        trial_df = trial_df.fillna(0)
+        trial_df['Ending Balance'] = trial_df['Initial Balance'] + trial_df['Period Balance']
+        
+        # تنسيق الأرقام للعرض
+        display_trial = trial_df.sort_values(by='Ending Balance', ascending=False)
+        
+        # عرض الإجماليات تحت التابة
+        t1, t2, t3 = st.columns(3)
+        t1.metric("Total Initial", f"{trial_df['Initial Balance'].sum():,.2f}")
+        t2.metric("Total Period", f"{trial_df['Period Balance'].sum():,.2f}")
+        t3.metric("Total Ending", f"{trial_df['Ending Balance'].sum():,.2f}")
+        
+        st.dataframe(display_trial.style.format({
+            'Initial Balance': '{:,.2f}',
+            'Period Balance': '{:,.2f}',
+            'Ending Balance': '{:,.2f}'
+        }), use_container_width=True)
+
+        # زر تحميل الـ Trial Balance كـ Excel
+        csv = trial_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Export Trial Balance to CSV", csv, f"Trial_Balance_{selected_year}.csv", "text/csv")
+
 else:
-    st.error("Data Load Failed. Please verify the CSV link.")
+    st.error("No data found.")
