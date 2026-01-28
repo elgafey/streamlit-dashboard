@@ -15,7 +15,7 @@ df["date"] = pd.to_datetime(df["date"])
 # Streamlit UI
 # -----------------------------
 st.title("📦 Raw Material Daily Consumption Report")
-st.write("تقرير يومي لاستهلاك المواد الخام (كمية + قيمة)")
+st.write(")")
 
 # -----------------------------
 # Filters
@@ -54,3 +54,4 @@ st.download_button(
     file_name="raw_material_daily.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
