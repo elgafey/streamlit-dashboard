@@ -1,73 +1,77 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
 
-# إعدادات الصفحة
-st.set_page_config(page_title="Ar Suhul - Customer Balances", layout="wide")
+# Page Configuration
+st.set_page_config(page_title="Ar Suhul - Customer Statements", layout="wide")
 
-st.title("👥 كشوف حسابات عملاء السهول")
+st.title("👥 Customer Account Statements - Ar Suhul")
 st.markdown("---")
 
 # -----------------------------
-# دالة تحميل البيانات
+# Data Loading Function
 # -----------------------------
 @st.cache_data 
 def load_ar_suhul():
-    # الرابط الخاص بجدول ارصدة السهول
+    # URL to the CSV file on GitHub
     url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/ar_suhul.csv"
     df = pd.read_csv(url, encoding='utf-8')
     
-    # تحويل التاريخ والتأكد من جودته
+    # Process dates to ensure correct sorting
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
     return df.dropna(subset=["date"])
+
+# -----------------------------
+# PDF/Excel Generation Logic
+# -----------------------------
+def to_excel(df_to_download, sheet_name):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df_to_download.to_excel(writer, index=False, sheet_name=sheet_name)
+    return output.getvalue()
 
 try:
     df_all = load_ar_suhul()
 
-    # -----------------------------
-    # الفلاتر الجانبية
-    # -----------------------------
-    st.sidebar.header("🔍 خيارات العرض")
-    
-    # استخراج قائمة العملاء الفريدة
+    # Sidebar: Bulk Selection
+    st.sidebar.header("🔍 Selection & Printing")
     partners = sorted(df_all['partner_id'].unique().tolist())
-    selected_partner = st.sidebar.selectbox("اختر العميل", options=[""] + partners)
+    
+    # Multiselect to allow choosing multiple clients for bulk printing
+    selected_partners = st.sidebar.multiselect("Select Customers for Statements", options=partners)
 
-    if selected_partner:
-        # 1. تصفية البيانات للعميل المحدد وترتيبها بالأقدم
-        cust_df = df_all[df_all['partner_id'] == selected_partner].sort_values(by='date')
+    if selected_partners:
+        st.info(f"Generating individual statements for {len(selected_partners)} customers...")
 
-        # ------------------------------------------------
-        # 2. حساب الرصيد التراكمي (المجمع) - منطق البايثون
-        # ------------------------------------------------
-        # نقوم بجمع (المدين - الدائن) لكل سطر مضافاً إليه السطور السابقة
-        cust_df['Running_Balance'] = (cust_df['debit'] - cust_df['credit']).cumsum()
+        for partner in selected_partners:
+            # 1. Filter and sort for the current partner
+            cust_df = df_all[df_all['partner_id'] == partner].sort_values(by='date')
 
-        # 3. عرض إجمالي المديونية الحالية كبطاقة قياس
-        current_bal = cust_df['Running_Balance'].iloc[-1]
-        st.metric(label=f"إجمالي رصيد {selected_partner}", value=f"{current_bal:,.2f} EGP")
+            # 2. Calculate Running Balance
+            cust_df['Running_Balance'] = (cust_df['debit'] - cust_df['credit']).cumsum()
 
-        st.divider()
+            # 3. UI Section for each partner
+            with st.expander(f"📄 Statement: {partner}", expanded=True):
+                # Metrics for the specific partner
+                current_bal = cust_df['Running_Balance'].iloc[-1]
+                st.metric(label="Current Balance", value=f"{current_bal:,.2f} EGP")
+                
+                # Table Preview
+                display_df = cust_df[['date', 'move_name', 'debit', 'credit', 'Running_Balance']]
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        # 4. تنسيق الجدول للعرض المحاسبي
-        # ترتيب الأعمدة وتغيير أسمائها لتكون واضحة للمستخدم
-        display_df = cust_df[['date', 'move_name', 'debit', 'credit', 'Running_Balance']].copy()
-        display_df.columns = ['التاريخ', 'رقم الحركة', 'مدين (عليه)', 'دائن (له)', 'الرصيد المجمع']
-
-        # 5. عرض الجدول مع تمييز الأرقام
-        st.subheader(f"تفاصيل حركة حساب: {selected_partner}")
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-        # 6. زر التحميل بصيغة CSV تدعم العربية
-        csv_file = display_df.to_csv(index=False).encode('utf-8-sig')
-        st.sidebar.download_button(
-            label="⬇️ تحميل كشف الحساب",
-            data=csv_file,
-            file_name=f"Statement_{selected_partner}.csv",
-            mime="text/csv"
-        )
+                # 4. Individual Download Button (The core requirement)
+                # This ensures each client gets their own separate file
+                excel_data = to_excel(display_df, sheet_name="Statement")
+                st.download_button(
+                    label=f"⬇️ Download {partner} Statement",
+                    data=excel_data,
+                    file_name=f"Statement_{partner}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"btn_{partner}" # Unique key for each button
+                )
     else:
-        st.info("💡 يرجى اختيار اسم العميل من القائمة الجانبية لعرض كشف الحساب المفصل.")
+        st.warning("Please select one or more customers from the sidebar to view and download statements.")
 
 except Exception as e:
-    st.error(f"❌ حدث خطأ أثناء تحميل البيانات: {e}")
-    st.info("تأكد من تحديث ملف ar_suhul.csv على GitHub.")
+    st.error(f"Error loading data: {e}")
