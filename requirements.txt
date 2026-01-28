@@ -4,3 +4,5 @@ xlsxwriter
 psycopg2-binary
 pdfkit
 fpdf2
+arabic-reshaper
+python-bidi
