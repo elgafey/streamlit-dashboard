@@ -11,13 +11,8 @@ df = pd.read_csv(url)
 # -----------------------------
 # Fix date column safely
 # -----------------------------
-# 1) تحويل التاريخ لنص (عشان لو فيه قيم ناقصة أو غريبة)
 df["date"] = df["date"].astype(str).str.strip()
-
-# 2) تحويل التاريخ لـ datetime بدون ما يقع
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
-
-# 3) حذف الصفوف اللي فيها تاريخ بايظ
 df = df.dropna(subset=["date"])
 
 # -----------------------------
@@ -31,7 +26,6 @@ st.write("")
 # -----------------------------
 st.sidebar.header("Filters")
 
-# Date Range Picker
 date_input = st.sidebar.date_input(
     "Date From → To",
     value=[df["date"].min(), df["date"].max()],
@@ -42,13 +36,7 @@ date_input = st.sidebar.date_input(
 # -----------------------------
 # Normalize Streamlit date input
 # -----------------------------
-# Streamlit ممكن يرجّع:
-# - قيمة واحدة
-# - List فيها قيمتين
-# - datetime.date
-# - datetime.datetime
-
-if isinstance(date_input, list):
+if isinstance(date_input, list) and len(date_input) == 2:
     start_date = date_input[0]
     end_date = date_input[1]
 else:
@@ -77,8 +65,7 @@ def to_excel(df):
     writer = pd.ExcelWriter(output, engine="xlsxwriter")
     df.to_excel(writer, index=False, sheet_name="RawMaterialDaily")
     writer.close()
-    processed_data = output.getvalue()
-    return processed_data
+    return output.getvalue()
 
 excel_file = to_excel(df)
 
