@@ -32,7 +32,7 @@ st.write("")
 st.sidebar.header("Filters")
 
 # Date Range Picker
-start_date, end_date = st.sidebar.date_input(
+date_input = st.sidebar.date_input(
     "Date From → To",
     value=[df["date"].min(), df["date"].max()],
     min_value=df["date"].min(),
@@ -40,8 +40,21 @@ start_date, end_date = st.sidebar.date_input(
 )
 
 # -----------------------------
-# Convert Streamlit dates to datetime
+# Normalize Streamlit date input
 # -----------------------------
+# Streamlit ممكن يرجّع:
+# - قيمة واحدة
+# - List فيها قيمتين
+# - datetime.date
+# - datetime.datetime
+
+if isinstance(date_input, list):
+    start_date = date_input[0]
+    end_date = date_input[1]
+else:
+    start_date = date_input
+    end_date = date_input
+
 start_date = pd.to_datetime(start_date)
 end_date = pd.to_datetime(end_date)
 
