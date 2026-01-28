@@ -3,16 +3,11 @@ import pandas as pd
 from fpdf import FPDF
 import re
 
-st.set_page_config(page_title="Ar Suhul - Reset & Search", layout="wide")
-
-st.title("📊 Customer Account Statements")
-st.markdown("---")
+st.set_page_config(page_title="Ar Suhul - Dashboard", layout="wide")
 
 # --- تهيئة الحالة (Session State) ---
-if 'search_input' not in st.session_state:
-    st.session_state['search_input'] = ""
-if 'pdf_ready' not in st.session_state:
-    st.session_state['pdf_ready'] = False
+if 'search_input' not in st.session_state: st.session_state['search_input'] = ""
+if 'pdf_ready' not in st.session_state: st.session_state['pdf_ready'] = False
 
 def clean_text(text):
     t = str(text).strip()
@@ -22,13 +17,14 @@ def clean_text(text):
 @st.cache_data 
 def load_and_fix_data():
     url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/ar_suhul.csv"
+    # قراءة البيانات مع معالجة الفراغات
     df = pd.read_csv(url, encoding='utf-8', na_filter=False)
-    # تصحيح تنسيق التاريخ المزعج
+    # حل مشكلة التاريخ GMT
     df['date'] = df['date'].str.split(' GMT').str[0] 
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
     df["credit"] = pd.to_numeric(df["credit"], errors="coerce").fillna(0)
-    # منع تضاعف الأرصدة
+    # حذف التكرار الوهمي
     df = df.drop_duplicates(subset=['move_name', 'partner_id', 'debit', 'credit'])
     return df
 
@@ -65,47 +61,54 @@ try:
     df_clean = load_and_fix_data()
     all_partners = sorted(df_clean['partner_id'].unique().tolist())
 
-    st.sidebar.header("🔍 Control Panel")
+    # --- القائمة الجانبية (Sidebar) ---
+    st.sidebar.header("🔍 Controls")
+    if st.sidebar.button("🧹 Reset Filters"):
+        st.session_state['search_input'] = ""; st.session_state['pdf_ready'] = False; st.rerun()
 
-    # --- زر مسح الفلتر ---
-    if st.sidebar.button("🧹 Clear All Filters"):
-        st.session_state['search_input'] = ""
-        st.session_state['pdf_ready'] = False
-        st.rerun() # لإعادة تحميل الواجهة فوراً
-
-    # حقل البحث مربوط بالـ session_state
-    search_query = st.sidebar.text_input("Search Customer Name:", value=st.session_state['search_input'])
-    
+    search_query = st.sidebar.text_input("Find Customer:", value=st.session_state['search_input'])
     filtered_list = [p for p in all_partners if search_query.lower() in p.lower()]
+    selected_partners = st.sidebar.multiselect("Select:", options=filtered_list)
+    if st.sidebar.checkbox("Select All Results"): selected_partners = filtered_list
+
+    # --- حسابات الإجماليات (Dashboard Metrics) ---
+    if selected_partners:
+        dashboard_df = df_clean[df_clean['partner_id'].isin(selected_partners)]
+    else:
+        dashboard_df = df_clean
+
+    total_debit = dashboard_df['debit'].sum()
+    total_credit = dashboard_df['credit'].sum()
+    net_balance = total_debit - total_credit
+
+    # عرض الإجماليات في مربعات جذابة
+    st.subheader("📌 Financial Summary")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Debit (مدين)", f"{total_debit:,.2f}")
+    col2.metric("Total Credit (دائن)", f"{total_credit:,.2f}")
+    # المربع المطلوب: الإجمالي النهائي
+    col3.metric("Net Balance (الصافي)", f"{net_balance:,.2f}", delta_color="normal")
     
-    selected_partners = st.sidebar.multiselect("Select Customers:", options=filtered_list)
+    st.markdown("---")
 
-    # خيار عرض الكل
-    if st.sidebar.checkbox("Select All Filtered Results"):
-        selected_partners = filtered_list
-
+    # --- عرض البيانات والتحميل ---
     if selected_partners:
         if st.sidebar.button("🛠️ Prepare PDF"):
             st.session_state['pdf_data'] = generate_pdf_bytes(df_clean, selected_partners)
             st.session_state['pdf_ready'] = True
 
         if st.session_state.get('pdf_ready'):
-            st.sidebar.download_button(
-                label="📥 Save Final PDF",
-                data=st.session_state['pdf_data'],
-                file_name="Statements.pdf",
-                mime="application/pdf"
-            )
+            st.sidebar.download_button("📥 Download PDF", data=st.session_state['pdf_data'], file_name="Statements.pdf", mime="application/pdf")
 
         for p in selected_partners:
-            with st.expander(f"Statement Preview: {p}", expanded=True):
+            with st.expander(f"Statement: {p}", expanded=True):
                 p_df = df_clean[df_clean['partner_id'] == p].copy().sort_values(by='date')
                 p_df['Running_Balance'] = (p_df['debit'] - p_df['credit']).cumsum()
                 disp = p_df[['date', 'move_name', 'debit', 'credit', 'Running_Balance']].copy()
                 disp['date'] = disp['date'].dt.strftime('%Y-%m-%d')
                 st.table(disp)
     else:
-        st.info("💡 استخدم القائمة الجانبية للبحث عن العملاء. يمكنك الضغط على Clear All Filters للبدء من جديد.")
+        st.info("💡 استخدم القائمة الجانبية للبحث عن العملاء. الإحصائيات أعلاه تعرض إجمالي كافة العملاء حالياً.")
 
 except Exception as e:
     st.error(f"Error: {e}")
