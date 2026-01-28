@@ -1,73 +1,108 @@
 import streamlit as st
 import pandas as pd
+import pdfkit
+from io import BytesIO
 
-# إعدادات الصفحة
-st.set_page_config(page_title="Ar Suhul - Customer Balances", layout="wide")
-
-st.title("👥 كشوف حسابات عملاء السهول")
-st.markdown("---")
+st.set_page_config(page_title="Customer PDF Report", layout="wide")
 
 # -----------------------------
-# دالة تحميل البيانات
+# Load Data
 # -----------------------------
-@st.cache_data 
-def load_ar_suhul():
-    # الرابط الخاص بجدول ارصدة السهول
-    url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/ar_suhul.csv"
-    df = pd.read_csv(url, encoding='utf-8')
-    
-    # تحويل التاريخ والتأكد من جودته
+@st.cache_data
+def load_data():
+    url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/raw_material_daily.csv"
+    df = pd.read_csv(url, encoding="utf-8")
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
-    return df.dropna(subset=["date"])
+    df = df.dropna(subset=["date"])
+    return df
 
-try:
-    df_all = load_ar_suhul()
+df = load_data()
 
-    # -----------------------------
-    # الفلاتر الجانبية
-    # -----------------------------
-    st.sidebar.header("🔍 خيارات العرض")
-    
-    # استخراج قائمة العملاء الفريدة
-    partners = sorted(df_all['partner_id'].unique().tolist())
-    selected_partner = st.sidebar.selectbox("اختر العميل", options=[""] + partners)
+# -----------------------------
+# English-only cleaner
+# -----------------------------
+def keep_english(text):
+    if not isinstance(text, str):
+        return text
+    if "/" in text:
+        return text.split("/")[0].strip()
+    return "".join(ch for ch in text if not ("\u0600" <= ch <= "\u06FF")).strip()
 
-    if selected_partner:
-        # 1. تصفية البيانات للعميل المحدد وترتيبها بالأقدم
-        cust_df = df_all[df_all['partner_id'] == selected_partner].sort_values(by='date')
+df["partner_id"] = df["partner_id"].apply(keep_english)
+df["product_name"] = df["product_name"].apply(keep_english)
 
-        # ------------------------------------------------
-        # 2. حساب الرصيد التراكمي (المجمع) - منطق البايثون
-        # ------------------------------------------------
-        # نقوم بجمع (المدين - الدائن) لكل سطر مضافاً إليه السطور السابقة
-        cust_df['Running_Balance'] = (cust_df['debit'] - cust_df['credit']).cumsum()
+# -----------------------------
+# Sidebar Filters
+# -----------------------------
+st.sidebar.header("Filters")
 
-        # 3. عرض إجمالي المديونية الحالية كبطاقة قياس
-        current_bal = cust_df['Running_Balance'].iloc[-1]
-        st.metric(label=f"إجمالي رصيد {selected_partner}", value=f"{current_bal:,.2f} EGP")
+min_date = df["date"].min()
+max_date = df["date"].max()
 
-        st.divider()
+date_input = st.sidebar.date_input(
+    "Select Date Range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
 
-        # 4. تنسيق الجدول للعرض المحاسبي
-        # ترتيب الأعمدة وتغيير أسمائها لتكون واضحة للمستخدم
-        display_df = cust_df[['date', 'move_name', 'debit', 'credit', 'Running_Balance']].copy()
-        display_df.columns = ['التاريخ', 'رقم الحركة', 'مدين (عليه)', 'دائن (له)', 'الرصيد المجمع']
+if isinstance(date_input, (list, tuple)) and len(date_input) == 2:
+    start_date, end_date = date_input
+else:
+    start_date = end_date = date_input
 
-        # 5. عرض الجدول مع تمييز الأرقام
-        st.subheader(f"تفاصيل حركة حساب: {selected_partner}")
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+mask = (df["date"] >= start_date) & (df["date"] <= end_date)
+df_filtered = df.loc[mask]
 
-        # 6. زر التحميل بصيغة CSV تدعم العربية
-        csv_file = display_df.to_csv(index=False).encode('utf-8-sig')
-        st.sidebar.download_button(
-            label="⬇️ تحميل كشف الحساب",
-            data=csv_file,
-            file_name=f"Statement_{selected_partner}.csv",
-            mime="text/csv"
-        )
-    else:
-        st.info("💡 يرجى اختيار اسم العميل من القائمة الجانبية لعرض كشف الحساب المفصل.")
+st.title("📦 Customer Report")
 
-except Exception as e:
-    st.error(f"❌ حدث خطأ أثناء تحميل البيانات: {e}")
-    st.info("تأكد من تحديث ملف ar_suhul.csv على GitHub.")
+st.dataframe(df_filtered, use_container_width=True)
+
+# -----------------------------
+# PDF Generator
+# -----------------------------
+def generate_customers_pdf(df):
+    customers = df["partner_id"].dropna().unique()
+
+    html = """
+    <html>
+    <head>
+        <style>
+            body { font-family: Arial; margin: 40px; }
+            h1 { text-align: center; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+            .page-break { page-break-after: always; }
+        </style>
+    </head>
+    <body>
+    """
+
+    for i, cust in enumerate(customers):
+        cust_df = df[df["partner_id"] == cust]
+
+        html += f"<h1>Customer: {cust}</h1>"
+        html += cust_df.to_html(index=False)
+
+        if i < len(customers) - 1:
+            html += '<div class="page-break"></div>'
+
+    html += "</body></html>"
+
+    pdf = pdfkit.from_string(html, False)
+    return pdf
+
+# -----------------------------
+# Button to generate PDF
+# -----------------------------
+st.sidebar.subheader("PDF Export")
+
+if st.sidebar.button("Generate PDF (One Page Per Customer)"):
+    pdf_bytes = generate_customers_pdf(df_filtered)
+
+    st.sidebar.download_button(
+        label="📄 Download Customers PDF",
+        data=pdf_bytes,
+        file_name="customers_report.pdf",
+        mime="application/pdf"
+    )
