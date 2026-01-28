@@ -3,17 +3,17 @@ import pandas as pd
 from fpdf import FPDF
 import arabic_reshaper
 from bidi.algorithm import get_display
-import re
+import requests
+import os
 
 # 1. إعدادات الصفحة
 st.set_page_config(page_title="Suhul Albeeah | Financial Portal", layout="wide")
 
 def fix_arabic(text):
-    """تعديل النصوص العربية لتظهر بشكل صحيح في الـ PDF"""
-    if not text or str(text).lower() in ['nan', 'none']:
-        return ""
-    reshaped_text = arabic_reshaper.reshape(str(text))
-    return get_display(reshaped_text)
+    """تجهيز النص العربي للظهور بشكل صحيح"""
+    if not text or str(text).lower() in ['nan', 'none']: return ""
+    reshaped = arabic_reshaper.reshape(str(text))
+    return get_display(reshaped)
 
 @st.cache_data 
 def load_data():
@@ -31,17 +31,21 @@ def load_data():
         return df
     except: return pd.DataFrame()
 
+def download_font():
+    """تحميل خط يدعم العربية إذا لم يكن موجوداً"""
+    font_path = "Amiri-Regular.ttf"
+    if not os.path.exists(font_path):
+        url = "https://github.com/googlefonts/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf"
+        r = requests.get(url)
+        with open(font_path, "wb") as f:
+            f.write(r.content)
+    return font_path
+
 def generate_pdf(df_filtered, selected_partners):
-    # استخدام FPDF2 لدعم الـ Unicode
     pdf = FPDF()
-    # إضافة خط يدعم العربية (يجب أن يكون ملف الخط متوفراً في السيرفر أو مجلد المشروع)
-    # ملاحظة: سنستخدم الخطوط الافتراضية هنا ولكن يفضل رفع ملف ttf للحصول على مظهر مثالي
-    try:
-        pdf.add_font('Arial', '', 'https://github.com/reingart/pyfpdf/raw/master/font/arial.ttf', uni=True)
-        pdf.set_font('Arial', '', 12)
-    except:
-        pdf.set_font("Helvetica", size=12)
-    
+    font_p = download_font()
+    # تسجيل الخط العربي في المكتبة لمنع الـ Unicode Error
+    pdf.add_font("Amiri", "", font_p)
     pdf.set_auto_page_break(auto=True, margin=15)
     
     for partner in selected_partners:
@@ -50,81 +54,76 @@ def generate_pdf(df_filtered, selected_partners):
         cust_df['Running_Balance'] = cust_df['net'].cumsum()
         
         pdf.add_page()
-        # الهيدر
-        pdf.set_font("Helvetica", 'B', 14)
-        pdf.cell(0, 8, "SUHUL ALBEEAH", ln=True, align='L')
-        pdf.set_font("Helvetica", '', 10)
-        pdf.cell(0, 5, "VAT: 300451393600003", ln=True); pdf.ln(10)
+        # استخدام خط Amiri لكل النصوص اللي فيها احتمال عربي
+        pdf.set_font("Amiri", size=14)
+        pdf.cell(0, 8, "SUHUL ALBEEAH - شركة سهول البيئة", ln=True, align='C')
+        pdf.set_font("Amiri", size=10)
+        pdf.cell(0, 5, fix_arabic("الرقم الضريبي: 300451393600003"), ln=True, align='R')
+        pdf.ln(10)
         
-        # العنوان والاسم العربي
-        pdf.set_font("Helvetica", 'B', 16)
-        pdf.cell(0, 10, "PARTNER LEDGER", ln=True, align='C')
+        pdf.set_font("Amiri", size=16)
+        pdf.cell(0, 10, fix_arabic("كشف حساب شريك"), ln=True, align='C')
         
-        # هنا تظهر أسماء العملاء بالعربي
-        pdf.set_font("Helvetica", 'B', 11)
-        pdf.cell(0, 10, f"Customer: {fix_arabic(partner)}", ln=True, align='R'); pdf.ln(5)
+        # طباعة اسم العميل بالعربي
+        pdf.set_font("Amiri", size=12)
+        pdf.cell(0, 10, f"Customer: {fix_arabic(partner)}", ln=True, align='R')
+        pdf.ln(5)
         
         # الجدول
         pdf.set_fill_color(230, 230, 230)
-        header_cols = [("Date", 30), ("Move Name", 70), ("Debit", 30), ("Credit", 30), ("Balance", 30)]
-        for h, w in header_cols:
-            pdf.cell(w, 10, h, 1, 0, 'C', True)
+        headers = [("Balance", 35), ("Credit", 30), ("Debit", 30), ("Description", 65), ("Date", 30)]
+        for h, w in headers: pdf.cell(w, 10, fix_arabic(h), 1, 0, 'C', True)
         pdf.ln()
         
-        pdf.set_font("Helvetica", '', 9)
         for _, r in cust_df.iterrows():
-            pdf.cell(30, 8, r['date'].strftime('%Y-%m-%d'), 1)
-            pdf.cell(70, 8, fix_arabic(r['move_name'])[:40], 1, 0, 'R')
-            pdf.cell(30, 8, f"{r['debit']:,.2f}", 1, 0, 'R')
+            pdf.cell(35, 8, f"{r['Running_Balance']:,.2f}", 1, 0, 'R')
             pdf.cell(30, 8, f"{r['credit']:,.2f}", 1, 0, 'R')
-            pdf.cell(30, 8, f"{r['Running_Balance']:,.2f}", 1, 1, 'R')
+            pdf.cell(30, 8, f"{r['debit']:,.2f}", 1, 0, 'R')
+            pdf.cell(65, 8, fix_arabic(r['move_name'])[:35], 1, 0, 'R')
+            pdf.cell(30, 8, r['date'].strftime('%Y-%m-%d'), 1, 1, 'C')
             
     return bytes(pdf.output())
 
+# --- التطبيق ---
 df = load_data()
-
 if not df.empty:
     tab1, tab2 = st.tabs(["📑 Ledger", "⚖️ Trial Balance"])
 
-    # --- TAB 1: LEDGER (فلاتر مستقلة) ---
     with tab1:
-        col_f1, col_f2 = st.columns([1, 2])
-        with col_f1:
-            date_range = st.date_input("Period:", [df['date'].min(), df['date'].max()], key="L1")
-        with col_f2:
-            all_p = sorted(df['partner_id'].unique().tolist())
-            selected = st.multiselect("Customers:", options=all_p)
-            s_all = st.checkbox("Select All")
-            if s_all: selected = all_p
+        st.subheader("Individual Statements")
+        # فلتر التاريخ المنفصل
+        d_range = st.date_input("Period:", [df['date'].min(), df['date'].max()], key="L_date")
+        all_p = sorted(df['partner_id'].unique().tolist())
+        selected = st.multiselect("Customers:", options=all_p)
+        if st.checkbox("Select All"): selected = all_p
 
         if selected:
-            mask = (df['date'] >= pd.Timestamp(date_range[0])) & \
-                   (df['date'] <= pd.Timestamp(date_range[1])) & \
-                   (df['partner_id'].isin(selected))
+            mask = (df['date'] >= pd.Timestamp(d_range[0])) & (df['date'] <= pd.Timestamp(d_range[1])) & (df['partner_id'].isin(selected))
             f_df = df[mask].copy()
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total Debit", f"{f_df['debit'].sum():,.2f}")
-            m2.metric("Total Credit", f"{f_df['credit'].sum():,.2f}")
-            m3.metric("Balance", f"{f_df['net'].sum():,.2f}")
             
-            if st.button("Generate Arabic PDF"):
-                st.session_state['arabic_pdf'] = generate_pdf(f_df, selected)
-            
-            if 'arabic_pdf' in st.session_state:
-                st.download_button("📥 Download", st.session_state['arabic_pdf'], "Suhul_Arabic.pdf")
+            # عرض الإجماليات
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Debit", f"{f_df['debit'].sum():,.2f}")
+            c2.metric("Total Credit", f"{f_df['credit'].sum():,.2f}")
+            c3.metric("Net Balance", f"{f_df['net'].sum():,.2f}")
 
-    # --- TAB 2: TRIAL BALANCE (سنة مستقلة) ---
+            if st.button("Download Arabic PDF"):
+                st.session_state['pdf_data'] = generate_pdf(f_df, selected)
+            
+            if 'pdf_data' in st.session_state:
+                st.download_button("📥 Save PDF", st.session_state['pdf_data'], "Suhul_Arabic_Ledger.pdf")
+
     with tab2:
-        y_col, _ = st.columns([1, 3])
-        with y_col:
-            years = sorted(df['date'].dt.year.dropna().unique().astype(int).tolist(), reverse=True)
-            sel_y = st.selectbox("Year:", years, key="Y1")
-
-        init = df[df['date'].dt.year < sel_y].groupby('partner_id')['net'].sum().reset_index(name='Initial')
-        peri = df[df['date'].dt.year == sel_y].groupby('partner_id')['net'].sum().reset_index(name='Period')
+        # تابة الميزان بفلتر سنة مستقل
+        years = sorted(df['date'].dt.year.dropna().unique().astype(int).tolist(), reverse=True)
+        s_year = st.selectbox("Fiscal Year:", years, key="TB_year")
+        
+        init = df[df['date'].dt.year < s_year].groupby('partner_id')['net'].sum().reset_index(name='Initial')
+        peri = df[df['date'].dt.year == s_year].groupby('partner_id')['net'].sum().reset_index(name='Period')
         tb = pd.merge(df[['partner_id']].drop_duplicates(), init, on='partner_id', how='left')
         tb = pd.merge(tb, peri, on='partner_id', how='left').fillna(0)
         tb['Ending'] = tb['Initial'] + tb['Period']
         
         st.dataframe(tb.sort_values('Ending', ascending=False), use_container_width=True)
+
+else: st.error("Data Load Error.")
