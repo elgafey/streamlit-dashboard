@@ -11,13 +11,13 @@ df = pd.read_csv(url)
 # -----------------------------
 # Fix date column safely
 # -----------------------------
-# 1) نحول التاريخ لنص عشان لو فيه قيم غريبة
+# 1) تحويل التاريخ لنص (عشان لو فيه قيم ناقصة أو غريبة)
 df["date"] = df["date"].astype(str).str.strip()
 
-# 2) نحول التاريخ لـ datetime بدون ما يقع
+# 2) تحويل التاريخ لـ datetime بدون ما يقع
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
-# 3) نشيل الصفوف اللي فيها تاريخ بايظ
+# 3) حذف الصفوف اللي فيها تاريخ بايظ
 df = df.dropna(subset=["date"])
 
 # -----------------------------
@@ -39,10 +39,16 @@ start_date, end_date = st.sidebar.date_input(
     max_value=df["date"].max()
 )
 
-# Apply filter only if both dates selected
-if start_date and end_date:
-    df = df[(df["date"] >= pd.to_datetime(start_date)) & 
-            (df["date"] <= pd.to_datetime(end_date))]
+# -----------------------------
+# Convert Streamlit dates to datetime
+# -----------------------------
+start_date = pd.to_datetime(start_date)
+end_date = pd.to_datetime(end_date)
+
+# -----------------------------
+# Apply filter
+# -----------------------------
+df = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
 
 # -----------------------------
 # Display Table
