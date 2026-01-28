@@ -15,19 +15,24 @@ df["date"] = pd.to_datetime(df["date"])
 # Streamlit UI
 # -----------------------------
 st.title("📦 Raw Material Daily Consumption Report")
-st.write(")")
+st.write("")
 
 # -----------------------------
 # Filters
 # -----------------------------
 st.sidebar.header("Filters")
 
-# Day filter
-unique_days = sorted(df["date"].dt.date.unique())
-selected_day = st.sidebar.selectbox("اختر اليوم", ["All"] + [str(d) for d in unique_days])
+# Date Picker
+selected_day = st.sidebar.date_input(
+    "اختر اليوم",
+    value=None,
+    min_value=df["date"].min(),
+    max_value=df["date"].max()
+)
 
-if selected_day != "All":
-    df = df[df["date"].dt.date == pd.to_datetime(selected_day).date()]
+# Apply filter only if user selected a date
+if selected_day:
+    df = df[df["date"].dt.date == selected_day]
 
 # -----------------------------
 # Display Table
@@ -54,4 +59,3 @@ st.download_button(
     file_name="raw_material_daily.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
-
