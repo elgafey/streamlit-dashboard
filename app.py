@@ -44,16 +44,27 @@ date_input = st.sidebar.date_input(
 # -----------------------------
 # Normalize Streamlit date input
 # -----------------------------
-if isinstance(date_input, list) and len(date_input) == 2:
-    start_date = date_input[0]
-    end_date = date_input[1]
-else:
-    start_date = date_input
-    end_date = date_input
+def normalize_date(value):
+    # لو القيمة List (Range)
+    if isinstance(value, list):
+        if len(value) == 0:
+            return None
+        return pd.to_datetime(value[0]).date()
 
-# تحويل start/end إلى تاريخ فقط
-start_date = pd.to_datetime(start_date).date()
-end_date = pd.to_datetime(end_date).date()
+    # لو None
+    if value is None:
+        return None
+
+    # لو date أو datetime
+    return pd.to_datetime(value).date()
+
+# لو Streamlit رجّع list فيها قيمتين
+if isinstance(date_input, list) and len(date_input) == 2:
+    start_date = normalize_date(date_input[0])
+    end_date = normalize_date(date_input[1])
+else:
+    start_date = normalize_date(date_input)
+    end_date = normalize_date(date_input)
 
 # -----------------------------
 # Apply filter
