@@ -8,13 +8,22 @@ from io import BytesIO
 url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/raw_material_daily.csv"
 df = pd.read_csv(url)
 
-# Convert date column to datetime
-df["date"] = pd.to_datetime(df["date"])
+# -----------------------------
+# Fix date column safely
+# -----------------------------
+# 1) نحول التاريخ لنص عشان لو فيه قيم غريبة
+df["date"] = df["date"].astype(str).str.strip()
+
+# 2) نحول التاريخ لـ datetime بدون ما يقع
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+# 3) نشيل الصفوف اللي فيها تاريخ بايظ
+df = df.dropna(subset=["date"])
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.title("📦 Raw Material Daily  Report")
+st.title("📦 Raw Material Daily Report")
 st.write("")
 
 # -----------------------------
@@ -24,7 +33,7 @@ st.sidebar.header("Filters")
 
 # Date Range Picker
 start_date, end_date = st.sidebar.date_input(
-    "اdate from to)",
+    "Date From → To",
     value=[df["date"].min(), df["date"].max()],
     min_value=df["date"].min(),
     max_value=df["date"].max()
