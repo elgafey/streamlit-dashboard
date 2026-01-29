@@ -4,7 +4,40 @@ from weasyprint import HTML
 import io
 
 # 1. Page Configuration
-st.set_page_config(page_title="Suhul Albeeah | Financial Reports", layout="wide")
+st.set_page_config(page_title="Suhul Albeeah | Secure Portal", layout="wide")
+
+# --- Authentication Logic ---
+def check_password():
+    """Returns True if the user had the correct password."""
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if (
+            st.session_state["username"] == "admin" 
+            and st.session_state["password"] == "suhul2026"
+        ):
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store username + password
+            del st.session_state["username"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show inputs for username + password.
+        st.title("Suhul Albeeah Financial Portal")
+        st.subheader("Login to access reports")
+        st.text_input("Username", on_change=password_entered, key="username")
+        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password not correct, show error + re-render inputs.
+        st.title("Suhul Albeeah Financial Portal")
+        st.text_input("Username", on_change=password_entered, key="username")
+        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        st.error("😕 User not found or incorrect password")
+        return False
+    else:
+        # Password correct.
+        return True
 
 @st.cache_data 
 def load_data():
@@ -12,7 +45,7 @@ def load_data():
         url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/ar_suhul.csv"
         df = pd.read_csv(url)
         df['date'] = pd.to_datetime(df['date'].str.split(' GMT').str[0], errors='coerce')
-        # Target accounts filtering
+        # Account filtering to match Odoo
         target_accounts = [1209001, 1209002, 1211000, 1213000]
         df = df[df['account_code'].isin(target_accounts)]
         df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
@@ -25,7 +58,7 @@ def load_data():
         return pd.DataFrame()
 
 def generate_pdf_multi_page(df_filtered, selected_partners):
-    """Generate Odoo-style PDF with running balance per page"""
+    """Generate Odoo-style PDF with running balance per page."""
     html_content = """
     <html dir="rtl" lang="ar">
     <head>
@@ -46,11 +79,9 @@ def generate_pdf_multi_page(df_filtered, selected_partners):
     </head>
     <body>
     """
-
     for partner in selected_partners:
         cust_df = df_filtered[df_filtered['partner_id'] == partner].sort_values('date')
         if cust_df.empty: continue
-        
         running_bal = 0
         html_content += f"""
         <div class="page-container">
@@ -60,18 +91,11 @@ def generate_pdf_multi_page(df_filtered, selected_partners):
             </div>
             <div class="report-title">Partner Ledger</div>
             <div style="font-size: 14px; margin-bottom: 20px;">
-                <strong>Partner:</strong> {partner}<br>
-                <strong>Date Generated:</strong> {pd.Timestamp.now().strftime('%Y-%m-%d')}
+                <strong>Partner:</strong> {partner}
             </div>
             <table>
                 <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Description</th>
-                        <th>Debit</th>
-                        <th>Credit</th>
-                        <th>Running Balance</th>
-                    </tr>
+                    <tr><th>Date</th><th>Description</th><th>Debit</th><th>Credit</th><th>Running Balance</th></tr>
                 </thead>
                 <tbody>
         """
@@ -81,9 +105,7 @@ def generate_pdf_multi_page(df_filtered, selected_partners):
                     <tr>
                         <td>{row['date'].strftime('%Y-%m-%d')}</td>
                         <td style="text-align: right;">{row['move_name']}</td>
-                        <td>{row['debit']:,.2f}</td>
-                        <td>{row['credit']:,.2f}</td>
-                        <td>{running_bal:,.2f}</td>
+                        <td>{row['debit']:,.2f}</td><td>{row['credit']:,.2f}</td><td>{running_bal:,.2f}</td>
                     </tr>
             """
         html_content += f"""
@@ -93,7 +115,7 @@ def generate_pdf_multi_page(df_filtered, selected_partners):
                 <div>Total Debit: <strong>{cust_df['debit'].sum():,.2f}</strong></div>
                 <div>Total Credit: <strong>{cust_df['credit'].sum():,.2f}</strong></div>
                 <div style="font-size: 16px; border-top: 1px solid #000; margin-top: 5px;">
-                    Closing Balance: <strong>{running_bal:,.2f}</strong>
+                    Balance: <strong>{running_bal:,.2f}</strong>
                 </div>
             </div>
             <div class="clearfix"></div>
@@ -102,65 +124,60 @@ def generate_pdf_multi_page(df_filtered, selected_partners):
     html_content += "</body></html>"
     return HTML(string=html_content).write_pdf()
 
-# --- UI Layout ---
-df = load_data()
+# --- Main App Logic ---
+if check_password():
+    st.sidebar.success("Welcome, Admin!")
+    if st.sidebar.button("Logout"):
+        del st.session_state["password_correct"]
+        st.rerun()
 
-if not df.empty:
-    tab1, tab2 = st.tabs(["📑 Detailed Ledgers", "⚖️ Trial Balance"])
-    
-    with tab1:
-        st.title("Customer Statements")
+    df = load_data()
+    if not df.empty:
+        tab1, tab2 = st.tabs(["📑 Detailed Ledgers", "⚖️ Trial Balance"])
         
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            date_range = st.date_input("Date Range:", [df['date'].min(), df['date'].max()], key="dr_main")
-        with c2:
-            partner_options = sorted(df['partner_id'].unique().tolist())
-            selected_partners = st.multiselect("Filter Partners:", options=partner_options)
-            if st.checkbox("Select All"):
-                selected_partners = partner_options
+        with tab1:
+            st.title("Customer Statements")
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                date_range = st.date_input("Period:", [df['date'].min(), df['date'].max()], key="dr_main")
+            with c2:
+                partner_options = sorted(df['partner_id'].unique().tolist())
+                selected_partners = st.multiselect("Filter Partners:", options=partner_options)
+                if st.checkbox("Select All Partners"): selected_partners = partner_options
 
-        if selected_partners:
-            mask = (df['date'] >= pd.Timestamp(date_range[0])) & \
-                   (df['date'] <= pd.Timestamp(date_range[1])) & \
-                   (df['partner_id'].isin(selected_partners))
-            filtered_df = df[mask].copy()
+            if selected_partners:
+                mask = (df['date'] >= pd.Timestamp(date_range[0])) & (df['date'] <= pd.Timestamp(date_range[1])) & (df['partner_id'].isin(selected_partners))
+                filtered_df = df[mask].copy()
 
-            st.divider()
-            # Preview Section with Running Balance
-            for partner in selected_partners:
-                p_data = filtered_df[filtered_df['partner_id'] == partner].sort_values('date').copy()
-                if not p_data.empty:
-                    # Calculate Running Balance for the preview table
-                    p_data['Running Balance'] = p_data['net'].cumsum()
-                    
-                    with st.expander(f"Preview Ledger: {partner}", expanded=True):
-                        col_m1, col_m2, col_m3 = st.columns(3)
-                        col_m1.metric("Total Debit", f"{p_data['debit'].sum():,.2f}")
-                        col_m2.metric("Total Credit", f"{p_data['credit'].sum():,.2f}")
-                        col_m3.metric("Final Balance", f"{p_data['Running Balance'].iloc[-1]:,.2f}")
-                        
-                        # Displaying Running Balance instead of Net
-                        st.dataframe(p_data[['date', 'move_name', 'debit', 'credit', 'Running Balance']], 
-                                     use_container_width=True, hide_index=True)
+                for partner in selected_partners:
+                    p_data = filtered_df[filtered_df['partner_id'] == partner].sort_values('date').copy()
+                    if not p_data.empty:
+                        # Running Balance Calculation
+                        p_data['Running Balance'] = p_data['net'].cumsum()
+                        with st.expander(f"Ledger: {partner}", expanded=True):
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Debit", f"{p_data['debit'].sum():,.2f}")
+                            m2.metric("Credit", f"{p_data['credit'].sum():,.2f}")
+                            m3.metric("Final Balance", f"{p_data['Running Balance'].iloc[-1]:,.2f}")
+                            # Using Running Balance in Table
+                            st.dataframe(p_data[['date', 'move_name', 'debit', 'credit', 'Running Balance']], 
+                                         use_container_width=True, hide_index=True)
 
-            if st.button("Download Multi-page PDF"):
-                with st.spinner("Processing PDF..."):
+                if st.button("Generate PDF Report"):
                     try:
                         pdf_bytes = generate_pdf_multi_page(filtered_df, selected_partners)
-                        st.download_button("📥 Save PDF Report", pdf_bytes, "Suhul_Statements.pdf")
+                        st.download_button("📥 Download PDF", pdf_bytes, "Suhul_Statements.pdf")
                     except Exception as e:
-                        st.error(f"Engine Error: {e}. Please ensure packages.txt is configured.")
+                        st.error(f"Engine Error: {e}")
 
-    with tab2:
-        st.title("Trial Balance")
-        years = sorted(df['date'].dt.year.dropna().unique().astype(int).tolist(), reverse=True)
-        sel_year = st.selectbox("Select Year:", years)
-        
-        opening = df[df['date'].dt.year < sel_year].groupby('partner_id')['net'].sum().reset_index(name='Opening')
-        movement = df[df['date'].dt.year == sel_year].groupby('partner_id')['net'].sum().reset_index(name='Period Movement')
-        tb = pd.merge(df[['partner_id']].drop_duplicates(), opening, on='partner_id', how='left')
-        tb = pd.merge(tb, movement, on='partner_id', how='left').fillna(0)
-        tb['Closing Balance'] = tb['Opening'] + tb['Period Movement']
-        
-        st.dataframe(tb.sort_values('Closing Balance', ascending=False), use_container_width=True)
+        with tab2:
+            st.title("Trial Balance")
+            years = sorted(df['date'].dt.year.dropna().unique().astype(int).tolist(), reverse=True)
+            sel_year = st.selectbox("Year:", years)
+            
+            opening = df[df['date'].dt.year < sel_year].groupby('partner_id')['net'].sum().reset_index(name='Opening')
+            movement = df[df['date'].dt.year == sel_year].groupby('partner_id')['net'].sum().reset_index(name='Period Movement')
+            tb = pd.merge(df[['partner_id']].drop_duplicates(), opening, on='partner_id', how='left')
+            tb = pd.merge(tb, movement, on='partner_id', how='left').fillna(0)
+            tb['Ending Balance'] = tb['Opening'] + tb['Period Movement']
+            st.dataframe(tb.sort_values('Ending Balance', ascending=False), use_container_width=True)
