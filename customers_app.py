@@ -4,172 +4,189 @@ from weasyprint import HTML
 import io
 
 # 1. إعدادات الصفحة
-st.set_page_config(page_title="Suhul Albeeah | Odoo Reporting", layout="wide")
+st.set_page_config(page_title="Suhul Albeeah | Financial Reports", layout="wide")
 
 @st.cache_data 
 def load_data():
     try:
+        # تحميل البيانات من الرابط الخاص بك
         url = "https://raw.githubusercontent.com/elgafey/sql-data/refs/heads/main/ar_suhul.csv"
         df = pd.read_csv(url)
+        # تنظيف التاريخ
         df['date'] = pd.to_datetime(df['date'].str.split(' GMT').str[0], errors='coerce')
-        # فلترة الحسابات لمطابقة أرقام أودو
+        # فلترة الحسابات لمطابقة أرقام أودو (الأكواد المطلوبة)
         target_accounts = [1209001, 1209002, 1211000, 1213000]
         df = df[df['account_code'].isin(target_accounts)]
+        # تحويل الأرقام لضمان الدقة
         df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
         df["credit"] = pd.to_numeric(df["credit"], errors="coerce").fillna(0)
         df["net"] = df["debit"] - df["credit"]
         df['partner_id'] = df['partner_id'].astype(str).str.strip()
         return df
     except Exception as e:
-        st.error(f"Error loading data: {e}")
+        st.error(f"خطأ في تحميل البيانات: {e}")
         return pd.DataFrame()
 
-def generate_odoo_style_pdf(df_filtered, partner_name):
-    """توليد PDF باستخدام HTML/CSS لدعم كامل للعربي (مثل أودو)"""
+def generate_pdf_multi_page(df_filtered, selected_partners):
+    """توليد PDF احترافي: كل عميل في صفحة مستقلة مع دعم كامل للعربية"""
     
-    # تصميم الجدول والتقرير
-    html_content = f"""
+    html_content = """
     <html dir="rtl" lang="ar">
     <head>
         <meta charset="utf-8">
         <style>
-            @page {{ size: A4; margin: 1cm; }}
-            body {{ font-family: 'Arial', sans-serif; direction: rtl; color: #333; }}
-            .header {{ border-bottom: 2px solid #1a237e; margin-bottom: 20px; padding-bottom: 10px; }}
-            .company-name {{ color: #1a237e; font-size: 24px; font-weight: bold; }}
-            .report-title {{ text-align: center; font-size: 20px; margin: 20px 0; background: #f5f5f5; padding: 10px; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }}
-            th {{ background-color: #1a237e; color: white; padding: 10px; border: 1px solid #ddd; }}
-            td {{ padding: 8px; border: 1px solid #ddd; text-align: center; }}
-            tr:nth-child(even) {{ background-color: #f9f9f9; }}
-            .summary-box {{ margin-top: 20px; border: 1px solid #1a237e; width: 300px; float: left; padding: 10px; }}
-            .footer {{ position: fixed; bottom: 0; width: 100%; text-align: center; font-size: 10px; color: #777; }}
+            @page { size: A4; margin: 1cm; }
+            body { font-family: 'Arial', sans-serif; direction: rtl; color: #333; line-height: 1.4; }
+            .page-container { page-break-after: always; border-bottom: 1px dashed #ccc; padding-bottom: 20px; }
+            .header { border-bottom: 3px solid #1a237e; margin-bottom: 20px; padding-bottom: 10px; display: flex; justify-content: space-between; }
+            .company-info { text-align: right; }
+            .company-name { color: #1a237e; font-size: 22px; font-weight: bold; }
+            .report-title { text-align: center; font-size: 20px; margin: 20px 0; background: #f5f5f5; padding: 10px; border-radius: 5px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
+            th { background-color: #1a237e; color: white; padding: 10px; border: 1px solid #ddd; }
+            td { padding: 8px; border: 1px solid #ddd; text-align: center; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            .summary-box { margin-top: 20px; border: 2px solid #1a237e; width: 280px; float: left; padding: 15px; border-radius: 5px; background: #fff; }
+            .summary-item { display: flex; justify-content: space-between; margin-bottom: 5px; }
+            .final-balance { font-size: 16px; font-weight: bold; border-top: 1px solid #1a237e; padding-top: 5px; margin-top: 5px; }
+            .clearfix { clear: both; }
+            .footer { text-align: center; font-size: 9px; color: #888; margin-top: 30px; }
         </style>
     </head>
     <body>
-        <div class="header">
-            <div class="company-name">شركة سهول البيئة لتدوير المواد الأولية</div>
-            <div>الرقم الضريبي: 300451393600003</div>
-        </div>
+    """
 
-        <div class="report-title">كشف حساب شريك (Partner Ledger)</div>
+    for partner in selected_partners:
+        # فلترة بيانات العميل الحالي فقط
+        cust_df = df_filtered[df_filtered['partner_id'] == partner].sort_values('date')
+        if cust_df.empty: continue
         
-        <div style="margin-bottom: 20px;">
-            <strong>اسم العميل:</strong> {partner_name}<br>
-            <strong>تاريخ التقرير:</strong> {pd.Timestamp.now().strftime('%Y-%m-%d')}
-        </div>
-
-        <table>
-            <thead>
-                <tr>
-                    <th>التاريخ</th>
-                    <th>البيان (Move Name)</th>
-                    <th>مدين</th>
-                    <th>دائن</th>
-                    <th>الرصيد الجاري</th>
-                </tr>
-            </thead>
-            <tbody>
-    """
-    
-    running_balance = 0
-    for _, row in df_filtered.sort_values('date').iterrows():
-        running_balance += row['net']
+        running_balance = 0
         html_content += f"""
-                <tr>
-                    <td>{row['date'].strftime('%Y-%m-%d')}</td>
-                    <td style="text-align: right;">{row['move_name']}</td>
-                    <td>{row['debit']:,.2f}</td>
-                    <td>{row['credit']:,.2f}</td>
-                    <td style="font-weight: bold;">{running_balance:,.2f}</td>
-                </tr>
+        <div class="page-container">
+            <div class="header">
+                <div class="company-info">
+                    <div class="company-name">شركة سهول البيئة لتدوير المواد الأولية</div>
+                    <div>الرقم الضريبي: 300451393600003</div>
+                </div>
+            </div>
+
+            <div class="report-title">كشف حساب عميل (Partner Ledger)</div>
+            
+            <div style="font-size: 14px; margin-bottom: 20px;">
+                <strong>اسم العميل:</strong> {partner}<br>
+                <strong>تاريخ الاستخراج:</strong> {pd.Timestamp.now().strftime('%Y-%m-%d')}
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 15%;">التاريخ</th>
+                        <th style="width: 45%;">البيان / مرجع القيد</th>
+                        <th style="width: 12%;">مدين</th>
+                        <th style="width: 12%;">دائن</th>
+                        <th style="width: 16%;">الرصيد الجاري</th>
+                    </tr>
+                </thead>
+                <tbody>
         """
-    
-    html_content += f"""
-            </tbody>
-        </table>
 
-        <div class="summary-box">
-            <div style="display: flex; justify-content: space-between;">
-                <span>إجمالي المدين:</span> <strong>{df_filtered['debit'].sum():,.2f}</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-                <span>إجمالي الدائن:</span> <strong>{df_filtered['credit'].sum():,.2f}</strong>
-            </div>
-            <hr>
-            <div style="display: flex; justify-content: space-between; font-size: 16px;">
-                <span>الرصيد النهائي:</span> <strong>{df_filtered['net'].sum():,.2f}</strong>
-            </div>
-        </div>
+        for _, row in cust_df.iterrows():
+            running_balance += row['net']
+            html_content += f"""
+                    <tr>
+                        <td>{row['date'].strftime('%Y-%m-%d')}</td>
+                        <td style="text-align: right;">{row['move_name']}</td>
+                        <td>{row['debit']:,.2f}</td>
+                        <td>{row['credit']:,.2f}</td>
+                        <td style="font-weight: bold;">{running_balance:,.2f}</td>
+                    </tr>
+            """
+        
+        html_content += f"""
+                </tbody>
+            </table>
 
-        <div class="footer">
-            تم استخراج هذا التقرير من النظام المالي لشركة سهول البيئة
+            <div class="summary-box">
+                <div class="summary-item">
+                    <span>إجمالي المدين:</span> <strong>{cust_df['debit'].sum():,.2f}</strong>
+                </div>
+                <div class="summary-item">
+                    <span>إجمالي الدائن:</span> <strong>{cust_df['credit'].sum():,.2f}</strong>
+                </div>
+                <div class="summary-item final-balance">
+                    <span>صافي الرصيد الحالي:</span> <strong>{cust_df['net'].sum():,.2f}</strong>
+                </div>
+            </div>
+            <div class="clearfix"></div>
+            <div class="footer">تعتبر هذه الصفحة كشف حساب رسمي لشركة سهول البيئة - صفحة مستقلة للعميل: {partner}</div>
         </div>
-    </body>
-    </html>
-    """
-    
-    # تحويل الـ HTML إلى PDF
+        """
+
+    html_content += "</body></html>"
     return HTML(string=html_content).write_pdf()
 
-# --- واجهة Streamlit ---
+# --- واجهة التطبيق ---
 df = load_data()
 
 if not df.empty:
-    tab1, tab2 = st.tabs(["📑 كشوف الحسابات", "⚖️ ميزان المراجعة"])
+    tab1, tab2 = st.tabs(["📑 كشوف الحسابات التفصيلية", "⚖️ ميزان المراجعة"])
     
     with tab1:
-        st.markdown("### 📝 استخراج كشف حساب (Odoo Style)")
+        st.markdown("### 📊 استخراج تقارير العملاء (Odoo Style)")
         
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            # فلتر تاريخ مستقل
-            d_range = st.date_input("اختر الفترة:", [df['date'].min(), df['date'].max()], key="ledger_date")
-        with c2:
-            all_partners = sorted(df['partner_id'].unique().tolist())
-            selected = st.multiselect("اختر الشركاء:", options=all_partners)
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            # فلتر تاريخ مستقل للتابة الأولى
+            d_range = st.date_input("حدد الفترة الزمنية:", [df['date'].min(), df['date'].max()], key="date_range_p")
+        with col_b:
+            partners_list = sorted(df['partner_id'].unique().tolist())
+            selected_customers = st.multiselect("اختر العملاء المطلوب طباعتهم:", options=partners_list)
+            if st.checkbox("اختيار جميع العملاء المتاحين"):
+                selected_customers = partners_list
+
+        if selected_customers:
+            # فلترة البيانات بناءً على الاختيارات
+            final_mask = (df['date'] >= pd.Timestamp(d_range[0])) & \
+                         (df['date'] <= pd.Timestamp(d_range[1])) & \
+                         (df['partner_id'].isin(selected_customers))
             
-        if selected:
-            # فلترة البيانات
-            mask = (df['date'] >= pd.Timestamp(d_range[0])) & \
-                   (df['date'] <= pd.Timestamp(d_range[1])) & \
-                   (df['partner_id'].isin(selected))
-            filtered_df = df[mask].copy()
+            working_df = df[final_mask].copy()
+            
+            st.info(f"تم العثور على {len(working_df)} حركات مالية للعملاء المختارين.")
 
-            # عرض ملخص سريع
-            m1, m2, m3 = st.columns(3)
-            m1.metric("إجمالي مدين", f"{filtered_df['debit'].sum():,.2f}")
-            m2.metric("إجمالي دائن", f"{filtered_df['credit'].sum():,.2f}")
-            m3.metric("صافي الرصيد", f"{filtered_df['net'].sum():,.2f}")
-
-            if st.button("🚀 طباعة التقرير الاحترافي (PDF)"):
-                with st.spinner("جاري إنشاء التقرير بأسلوب أودو..."):
+            if st.button("🚀 إصدار ملف PDF مجمع (كل عميل في صفحة)"):
+                with st.spinner("جاري معالجة الصفحات وتنسيق اللغة العربية..."):
                     try:
-                        # سنطبع التقرير لأول عميل مختار كمثال أو ندمجهم
-                        pdf_bytes = generate_odoo_style_pdf(filtered_df, ", ".join(selected))
+                        pdf_file = generate_pdf_multi_page(working_df, selected_customers)
                         st.download_button(
-                            label="📥 تحميل ملف PDF",
-                            data=pdf_bytes,
-                            file_name=f"Suhul_Ledger_{d_range[0]}.pdf",
+                            label="📥 تحميل ملف PDF الجاهز",
+                            data=pdf_file,
+                            file_name=f"Suhul_Albeeah_Reports.pdf",
                             mime="application/pdf"
                         )
                     except Exception as e:
-                        st.error(f"خطأ في المحرك: {e}")
-                        st.info("تأكد من وجود ملف packages.txt في GitHub وتثبيت WeasyPrint")
+                        st.error(f"خطأ في محرك الطباعة: {e}")
+                        st.warning("تأكد من إعداد ملف packages.txt في مستودع GitHub.")
 
     with tab2:
         st.markdown("### ⚖️ ميزان المراجعة السنوي")
-        years = sorted(df['date'].dt.year.dropna().unique().astype(int).tolist(), reverse=True)
-        sel_year = st.selectbox("اختر السنة المالية:", years, key="tb_year")
+        available_years = sorted(df['date'].dt.year.dropna().unique().astype(int).tolist(), reverse=True)
+        selected_year = st.selectbox("اختر السنة المالية:", available_years, key="year_selector")
         
-        # حساب ميزان المراجعة
-        init = df[df['date'].dt.year < sel_year].groupby('partner_id')['net'].sum().reset_index(name='افتتاحي')
-        peri = df[df['date'].dt.year == sel_year].groupby('partner_id')['net'].sum().reset_index(name='حركة الفترة')
-        tb = pd.merge(df[['partner_id']].drop_duplicates(), init, on='partner_id', how='left')
-        tb = pd.merge(tb, peri, on='partner_id', how='left').fillna(0)
-        tb['الرصيد الختامي'] = tb['افتتاحي'] + tb['حركة الفترة']
+        # حساب الميزان (افتتاحي، حركة، ختامي)
+        opening = df[df['date'].dt.year < selected_year].groupby('partner_id')['net'].sum().reset_index(name='الرصيد الافتتاحي')
+        movement = df[df['date'].dt.year == selected_year].groupby('partner_id')['net'].sum().reset_index(name='حركة السنة')
         
-        st.dataframe(tb.sort_values('الرصيد الختامي', ascending=False).style.format("{:,.2f}", subset=['افتتاحي', 'حركة الفترة', 'الرصيد الختامي']), 
-                     use_container_width=True)
+        trial_balance = pd.merge(df[['partner_id']].drop_duplicates(), opening, on='partner_id', how='left')
+        trial_balance = pd.merge(trial_balance, movement, on='partner_id', how='left').fillna(0)
+        trial_balance['الرصيد الختامي'] = trial_balance['الرصيد الافتتاحي'] + trial_balance['حركة السنة']
+        
+        # عرض الجدول بتنسيق مالي
+        st.dataframe(
+            trial_balance.sort_values('الرصيد الختامي', ascending=False)
+            .style.format("{:,.2f}", subset=['الرصيد الافتتاحي', 'حركة السنة', 'الرصيد الختامي']),
+            use_container_width=True
+        )
 else:
-    st.error("لم يتم تحميل أي بيانات، يرجى التحقق من المصدر.")
+    st.warning("برجاء التأكد من توفر البيانات في الرابط المصدر.")
